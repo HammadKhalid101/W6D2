@@ -5,10 +5,26 @@ require 'active_support/inflector'
 
 class SQLObject
   def self.columns
-    # ...
+  if @cols == nil
+    cols = DBConnection.execute2(<<-SQL)
+    SELECT
+      *
+    FROM
+      "#{table_name}"
+  SQL
+    @cols = cols.first.map {|col| col.to_sym}  
+    @cols
+  else
+    @cols
+  end
   end
 
   def self.finalize!
+    self.columns
+    @cols.each do |col|
+      define_method(col) { self.attributes[col] }
+      define_method("#{col}=") { |value = nil|  self.attributes[col] = value }
+    end
   end
 
   def self.table_name=(table_name)
@@ -22,30 +38,67 @@ class SQLObject
 
   def self.all
     # ...
+    rows = DBConnection.execute(<<-SQL)
+      SELECT *
+      FROM #{table_name}
+    SQL
+
+    self.parse_all(rows)
   end
 
   def self.parse_all(results)
     # ...
+    results.map do |result|
+      self.new(result)
+    end
   end
 
   def self.find(id)
     # ...
+    object = DBConnection.execute(<<-SQL, id)
+    SELECT *
+    FROM #{table_name}
+    WHERE id = ?
+  SQL
+    self.parse_all(object).first
   end
 
   def initialize(params = {})
     # ...
+    class_name = self.class
+    cols = class_name.columns
+    params.each do |item, value|
+      item_sym = item.to_sym
+      if !cols.include?(item_sym)
+        raise "unknown attribute '#{item_sym}'"
+      else 
+        self.send("#{item_sym}=", value)
+      end
+    end
+      
   end
 
   def attributes
     # ...
+    @attributes ||= {}
   end
 
   def attribute_values
     # ...
+    @attributes.values
   end
 
   def insert
     # ...
+    col_names = self.class.columns.join(",")
+    question_marks = (["?"] * self.class.columns.length).join(",")
+    new_record = DBConnection.execute(<<-SQL, *attribute_values[1..-1])
+    INSERT INTO
+    #{self.class.table_name} (#{col_names})
+    VALUES
+    (#{question_marks})
+    SQL
+    self.id = DBConnection.last_insert_row_id
   end
 
   def update
